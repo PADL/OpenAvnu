@@ -44,9 +44,21 @@ https://github.com/benhoyt/inih/commit/74d2ca064fb293bc60a77b0bd068075b293cf175.
 #define	AVB_LOG_COMPONENT	"Media Queue"
 #include "openavb_log.h"
 
-static MUTEX_HANDLE(gMediaQMutex);
-#define MEDIAQ_LOCK() { MUTEX_CREATE_ERR(); MUTEX_LOCK(gMediaQMutex); MUTEX_LOG_ERR("Mutex Lock failure"); }
-#define MEDIAQ_UNLOCK() { MUTEX_CREATE_ERR(); MUTEX_UNLOCK(gMediaQMutex); MUTEX_LOG_ERR("Mutex Unlock failure"); }
+#define MEDIAQ_LOCK(pMediaQInfo)	do {			\
+		if (pMediaQInfo->threadSafeOn) {		\
+			MUTEX_CREATE_ERR();			\
+			MUTEX_LOCK(pMediaQInfo->lock);		\
+			MUTEX_LOG_ERR("Mutex lock failure"); 	\
+		}						\
+	} while(0)
+
+#define MEDIAQ_UNLOCK(pMediaQInfo)	do {			\
+		if (pMediaQInfo->threadSafeOn) {		\
+			MUTEX_CREATE_ERR();			\
+			MUTEX_UNLOCK(pMediaQInfo->lock);	\
+			MUTEX_LOG_ERR("Mutex unlock failure"); 	\
+		}						\
+	} while(0)
 
 //#define DUMP_HEAD_PUSH 		1
 //#define DUMP_TAIL_PULL 		1
@@ -59,6 +71,8 @@ FILE *pFileTailPull = 0;
 #endif
 
 typedef struct {
+	MUTEX_HANDLE(lock);
+
 	// Maximum number of items the queue can hold.
 	int itemCount;
 
@@ -71,15 +85,9 @@ typedef struct {
 	// Next item to be filled
 	int head;	
 
-	// True if the head item is locked.
-	bool headLocked; 
-				
 	// Next item to be pulled
 	int tail;	
 				
-	// True is next item to be pulled is locked
-	bool tailLocked;
-
 	// Maximum latency
 	U32 maxLatencyUsec;
 		
@@ -173,7 +181,6 @@ void x_openavbMediaQPurgeStaleTail(media_q_t *pMediaQ)
 							media_q_item_t *pTail = &pMediaQInfo->pItems[pMediaQInfo->tail];
 	
 							if (pTail) {
-								pMediaQInfo->tailLocked = TRUE;
 								bool bPurge = FALSE;
 
 								if (bFirst) {
@@ -200,7 +207,6 @@ void x_openavbMediaQPurgeStaleTail(media_q_t *pMediaQ)
 									bMore = TRUE;
 								}
 								else {
-									pMediaQInfo->tailLocked = FALSE;
 									pTail = NULL;
 								}
 							}
@@ -228,9 +234,7 @@ media_q_t* openavbMediaQCreate()
 			pMediaQInfo->itemCount = 0;
 			pMediaQInfo->itemSize = 0;
 			pMediaQInfo->head = 0;
-			pMediaQInfo->headLocked = FALSE;
 			pMediaQInfo->tail = -1;
-			pMediaQInfo->tailLocked = FALSE;
 			pMediaQInfo->maxLatencyUsec = 0;
 			pMediaQInfo->threadSafeOn = FALSE;
 			pMediaQInfo->maxStaleTailUsec = MICROSECONDS_PER_SECOND;
@@ -253,6 +257,13 @@ void openavbMediaQThreadSafeOn(media_q_t *pMediaQ)
 		if (pMediaQ->pPvtMediaQInfo) {
 			media_q_info_t *pMediaQInfo = (media_q_info_t *)(pMediaQ->pPvtMediaQInfo);
 			pMediaQInfo->threadSafeOn = TRUE;
+			MUTEX_ATTR_HANDLE(mta);
+			MUTEX_ATTR_INIT(mta);
+			MUTEX_ATTR_SET_TYPE(mta, MUTEX_ATTR_TYPE_DEFAULT);
+			MUTEX_ATTR_SET_NAME(mta, "openavbMediaQMutex");
+			MUTEX_CREATE_ERR();
+			MUTEX_CREATE(pMediaQInfo->lock, mta);
+			MUTEX_LOG_ERR("Could not create/initialize 'openavbMediaQMutex' mutex");
 		}
 	}
 
@@ -455,6 +466,11 @@ bool openavbMediaQDelete(media_q_t *pMediaQ)
 				free(pMediaQInfo->pItems);
 				pMediaQInfo->pItems = NULL;
 			}
+			if (pMediaQInfo->threadSafeOn) {
+				MUTEX_CREATE_ERR();
+				MUTEX_DESTROY(pMediaQInfo->lock);
+				MUTEX_LOG_ERR("Could not destroy 'openavbMediaQMutex' mutex");
+			}
 			free(pMediaQ->pPvtMediaQInfo);
 			pMediaQ->pPvtMediaQInfo = NULL;
 
@@ -522,20 +538,15 @@ media_q_item_t *openavbMediaQHeadLock(media_q_t *pMediaQ)
 	if (pMediaQ) {
 		if (pMediaQ->pPvtMediaQInfo) {
 			media_q_info_t *pMediaQInfo = (media_q_info_t *)(pMediaQ->pPvtMediaQInfo);
-			if (pMediaQInfo->threadSafeOn) {
-				MEDIAQ_LOCK();
-			}
+			MEDIAQ_LOCK(pMediaQInfo);
 			if (pMediaQInfo->itemCount > 0) {
 				if (pMediaQInfo->head > -1) {
-					pMediaQInfo->headLocked = TRUE;
 					AVB_TRACE_EXIT(AVB_TRACE_MEDIAQ_DETAIL);
 					// Mutex (LOCK()) if acquired stays locked
 					return &pMediaQInfo->pItems[pMediaQInfo->head];
 				}
 			}
-			if (pMediaQInfo->threadSafeOn) {
-				MEDIAQ_UNLOCK();
-			}
+			MEDIAQ_UNLOCK(pMediaQInfo);
 		}
 	}
 
@@ -552,10 +563,7 @@ void openavbMediaQHeadUnlock(media_q_t *pMediaQ)
 			media_q_info_t *pMediaQInfo = (media_q_info_t *)(pMediaQ->pPvtMediaQInfo);
 			if (pMediaQInfo->itemCount > 0) {
 				if (pMediaQInfo->head > -1) {
-					pMediaQInfo->headLocked = FALSE;
-					if (pMediaQInfo->threadSafeOn) {
-						MEDIAQ_UNLOCK();
-					}
+					MEDIAQ_UNLOCK(pMediaQInfo);
 				}
 			}
 		}
@@ -597,11 +605,7 @@ bool openavbMediaQHeadPush(media_q_t *pMediaQ)
 
 					x_openavbMediaQIncrementHead(pMediaQInfo);
 
-					pMediaQInfo->headLocked = FALSE;
-					if (pMediaQInfo->threadSafeOn) {
-						MEDIAQ_UNLOCK();
-					}
-
+					MEDIAQ_UNLOCK(pMediaQInfo);
 					AVB_TRACE_EXIT(AVB_TRACE_MEDIAQ_DETAIL);
 					return TRUE;
 				}
@@ -624,9 +628,7 @@ media_q_item_t* openavbMediaQTailLock(media_q_t *pMediaQ, bool ignoreTimestamp)
 	if (pMediaQ) {
 		if (pMediaQ->pPvtMediaQInfo) {
 			media_q_info_t *pMediaQInfo = (media_q_info_t *)(pMediaQ->pPvtMediaQInfo);
-			if (pMediaQInfo->threadSafeOn) {
-				MEDIAQ_LOCK();
-			}
+			MEDIAQ_LOCK(pMediaQInfo);
 			if (pMediaQInfo->itemCount > 0) {
 				if (pMediaQInfo->tail > -1) {
 					media_q_item_t *pTail = &pMediaQInfo->pItems[pMediaQInfo->tail];
@@ -634,23 +636,18 @@ media_q_item_t* openavbMediaQTailLock(media_q_t *pMediaQ, bool ignoreTimestamp)
 					// Check if tail item is ready.
 					if (!ignoreTimestamp) {
 						if (!openavbAvtpTimeIsPast(pTail->pAvtpTime)) {
-							if (pMediaQInfo->threadSafeOn) {
-								MEDIAQ_UNLOCK();
-							}
+							MEDIAQ_UNLOCK(pMediaQInfo);
 							AVB_TRACE_EXIT(AVB_TRACE_MEDIAQ_DETAIL);
 							return NULL;
 						}
 					}
 
-					pMediaQInfo->tailLocked = TRUE;
 					// Mutex (LOCK()) if acquired stays locked
 					AVB_TRACE_EXIT(AVB_TRACE_MEDIAQ_DETAIL);
 					return pTail;
 				}
 			}
-			if (pMediaQInfo->threadSafeOn) {
-				MEDIAQ_UNLOCK();
-			}
+			MEDIAQ_UNLOCK(pMediaQInfo);
 		}
 	}
 
@@ -667,10 +664,7 @@ void openavbMediaQTailUnlock(media_q_t *pMediaQ)
 			media_q_info_t *pMediaQInfo = (media_q_info_t *)(pMediaQ->pPvtMediaQInfo);
 			if (pMediaQInfo->itemCount > 0) {
 				if (pMediaQInfo->tail > -1) {
-					pMediaQInfo->tailLocked = FALSE;
-					if (pMediaQInfo->threadSafeOn) {
-						MEDIAQ_UNLOCK();
-					}
+					MEDIAQ_UNLOCK(pMediaQInfo);
 				}
 			}
 		}
@@ -713,10 +707,7 @@ bool openavbMediaQTailPull(media_q_t *pMediaQ)
 
 					x_openavbMediaQIncrementTail(pMediaQInfo);
 
-					pMediaQInfo->tailLocked = FALSE;
-					if (pMediaQInfo->threadSafeOn) {
-						MEDIAQ_UNLOCK();
-					}
+					MEDIAQ_UNLOCK(pMediaQInfo);
 					
 					AVB_TRACE_EXIT(AVB_TRACE_MEDIAQ_DETAIL);
 					return TRUE;
@@ -742,10 +733,7 @@ bool openavbMediaQTailItemTake(media_q_t *pMediaQ, media_q_item_t* pItem)
 					x_openavbMediaQIncrementTail(pMediaQInfo);
 
 					pItem->taken = TRUE;
-					pMediaQInfo->tailLocked = FALSE;
-					if (pMediaQInfo->threadSafeOn) {
-						MEDIAQ_UNLOCK();
-					}
+					MEDIAQ_UNLOCK(pMediaQInfo);
 					
 					AVB_TRACE_EXIT(AVB_TRACE_MEDIAQ_DETAIL);
 					return TRUE;
@@ -770,9 +758,7 @@ bool openavbMediaQTailItemGive(media_q_t *pMediaQ, media_q_item_t* pItem)
 		if (pMediaQ) {
 			if (pMediaQ->pPvtMediaQInfo) {
 				media_q_info_t *pMediaQInfo = (media_q_info_t *)(pMediaQ->pPvtMediaQInfo);
-				if (pMediaQInfo->threadSafeOn) {
-					MEDIAQ_LOCK();
-				}
+				MEDIAQ_LOCK(pMediaQInfo);
 				if (pMediaQInfo->itemCount > 0) {
 					if (pMediaQInfo->head == -1) {
 						// Transition from full mediaq to an available item slot. Find this item that was just give back
@@ -786,9 +772,7 @@ bool openavbMediaQTailItemGive(media_q_t *pMediaQ, media_q_item_t* pItem)
 						}
 					}
 				}
-				if (pMediaQInfo->threadSafeOn) {
-					MEDIAQ_UNLOCK();
-				}
+				MEDIAQ_UNLOCK(pMediaQInfo);
 			}
 		}
 		AVB_TRACE_EXIT(AVB_TRACE_MEDIAQ_DETAIL);
