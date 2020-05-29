@@ -229,9 +229,10 @@ bool pcapRawsockRxMulticast(void *pvRawsock, bool add_membership, const U8 addr[
 	pcap_rawsock_t *rawsock = (pcap_rawsock_t*)pvRawsock;
 
 	struct bpf_program comp_filter_exp;
-	char filter_exp[30];
+	char filter_exp[64];
 
-	sprintf(filter_exp, "ether dst %02x:%02x:%02x:%02x:%02x:%02x", addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
+	snprintf(filter_exp, sizeof(filter_exp), "ether proto %u and ether dst %02x:%02x:%02x:%02x:%02x:%02x",
+		 rawsock->base.ethertype, addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
 
 	AVB_LOGF_DEBUG("%s %d %s", __func__, (int)add_membership, filter_exp);
 
