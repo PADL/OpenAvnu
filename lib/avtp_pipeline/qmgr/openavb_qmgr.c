@@ -130,7 +130,7 @@ static bool setupHWQueue(int nClass, unsigned classBytesPerSec)
 	err = igb_set_class_bandwidth2(qdisc_data.igb_dev, class_a_bytes_per_sec, class_b_bytes_per_sec);
 	if (err)
 		AVB_LOGF_ERROR("Adding stream; igb_set_class_bandwidth failed: %s", strerror(err));
-#else // (AVB_FEATURE_ATL)
+#elif (AVB_FEATURE_ATL)
 	err = atl_set_class_bandwidth(qdisc_data.atl_dev, 
 								  class_a_bytes_per_sec, 
 								  class_b_bytes_per_sec);
@@ -284,7 +284,7 @@ bool openavbQmgrInitialize(int mode, int ifindex, const char* ifname, unsigned m
 		AVB_LOG_ERROR("Initializing QMgr; unable to acquire igb device");
 	}
 	else
-#endif
+#endif 
 #if (AVB_FEATURE_ATL)
 	if ( qdisc_data.mode != AVB_SHAPER_DISABLED
 	     && (qdisc_data.atl_dev = atlAcquireDevice(ifname)) == 0)
