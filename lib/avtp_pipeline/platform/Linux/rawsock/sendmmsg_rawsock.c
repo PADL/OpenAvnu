@@ -36,23 +36,15 @@ https://github.com/benhoyt/inih/commit/74d2ca064fb293bc60a77b0bd068075b293cf175.
 #include <sys/ioctl.h>
 #include <linux/if_packet.h>
 #include <linux/filter.h>
-
+#if USE_LAUNCHTIME && defined(SCM_TXTIME)
+#include <linux/net_tstamp.h>
+#endif
 #define AVB_LOG_LEVEL AVB_LOG_LEVEL_INFO
 
 #include "openavb_trace.h"
 
 #define	AVB_LOG_COMPONENT	"Raw Socket"
 #include "openavb_log.h"
-
-
-#if USE_LAUNCHTIME
-
-#ifndef SCM_TIMEDLAUNCH
-#define SCM_TIMEDLAUNCH 0x04
-#endif
-
-#endif /* if USE_LAUNCHTIME */
-
 
 static void fillmsghdr(struct msghdr *msg, struct iovec *iov,
 #if USE_LAUNCHTIME
@@ -78,7 +70,13 @@ static void fillmsghdr(struct msghdr *msg, struct iovec *iov,
 
 		cmsg = CMSG_FIRSTHDR(msg);
 		cmsg->cmsg_level = SOL_SOCKET;
+#ifdef SCM_TXTIME
+		cmsg->cmsg_type = SCM_TXTIME;
+#elif defined(SCM_TIMEDLAUNCH)
 		cmsg->cmsg_type = SCM_TIMEDLAUNCH;
+#else
+#error USE_LAUNCHTIME set but no support for timed packets
+#endif
 		cmsg->cmsg_len = CMSG_LEN(sizeof time);
 
 		tsptr = (uint64_t *)CMSG_DATA(cmsg);
@@ -149,6 +147,19 @@ void* sendmmsgRawsockOpen(sendmmsg_rawsock_t* rawsock, const char *ifname, bool 
 		AVB_TRACE_EXIT(AVB_TRACE_RAWSOCK);
 		return NULL;
 	}
+
+#if USE_LAUNCHTIME && defined(SO_TXTIME)
+	struct sock_txtime txtime = {
+		.clockid = CLOCK_MONOTONIC,
+		.flags = SOF_TXTIME_DEADLINE_MODE,
+	};
+	if (setsockopt(rawsock->sock, SOL_SOCKET, SO_TXTIME, &txtime, sizeof(txtime)) < 0) {
+		AVB_LOG_ERROR("Creating rawsock; failed to set txtime");
+		sendmmsgRawsockClose(rawsock);
+		AVB_TRACE_EXIT(AVB_TRACE_RAWSOCK);
+		return NULL;
+	}
+#endif /* USE_LAUNCHTIME && SO_TXTIME */
 
 	// Bind to interface
 	struct sockaddr_ll my_addr;
@@ -350,7 +361,7 @@ int sendmmsgRawsockSend(void *pvRawsock)
 	IF_LOG_INTERVAL(1000) AVB_LOGF_DEBUG("Send with %d of %d buffers ready", rawsock->buffersReady, rawsock->frameCount);
 	sz = sendmmsg(rawsock->sock, rawsock->mmsg, rawsock->buffersReady, 0);
 	if (sz < 0) {
-		AVB_LOGF_ERROR("Call to sendmmsg failed! Error code was %d", sz);
+		AVB_LOGF_ERROR("Call to sendmmsg failed! Error code was %d(%s)", errno, strerror(errno));
 		bytes = sz;
 	} else {
 		int i;

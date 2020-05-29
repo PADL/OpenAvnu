@@ -42,7 +42,7 @@ https://github.com/benhoyt/inih/commit/74d2ca064fb293bc60a77b0bd068075b293cf175.
 
 #define MSG_COUNT 8
 #define MAX_FRAME_SIZE 1024
-#define USE_LAUNCHTIME 0
+#define USE_LAUNCHTIME 1
 
 
 // State information for raw socket
