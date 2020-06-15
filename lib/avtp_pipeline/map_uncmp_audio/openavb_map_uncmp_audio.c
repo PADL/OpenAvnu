@@ -210,6 +210,11 @@ static void x_calculateSizes(media_q_t *pMediaQ)
 				break;
 		}
 
+		if (pPvtData->txInterval == 0) {
+			AVB_LOG_WARNING("map_nv_tx_rate not set, using default");
+			pPvtData->txInterval = 4000;
+		}
+
 		pPubMapInfo->framesPerPacket = (pPubMapInfo->audioRate / pPvtData->txInterval);
 		if (pPubMapInfo->framesPerPacket < 1) {
 			pPubMapInfo->framesPerPacket = 1;
