@@ -19,7 +19,7 @@ clean:
 build_avdecc/Makefile:
 	mkdir -p build_avdecc && \
 	cd build_avdecc && \
-	cmake -DCMAKE_BUILD_TYPE=Release \
+	cmake -DCMAKE_BUILD_TYPE=Debug \
 	      -DCMAKE_TOOLCHAIN_FILE=../platform/Linux/$(PLATFORM_TOOLCHAIN).cmake \
 	      -DAVB_FEATURE_AVDECC=$(AVB_FEATURE_AVDECC) \
 	      ..

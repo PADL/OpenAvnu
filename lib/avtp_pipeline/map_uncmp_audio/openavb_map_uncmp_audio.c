@@ -478,6 +478,9 @@ void openavbMapUncmpAudioTxInitCB(media_q_t *pMediaQ)
 		return;
 	}
 
+	// reset data block counter
+	pPvtData->DBC = 0;
+
 	AVB_TRACE_EXIT(AVB_TRACE_MAP);
 }
 

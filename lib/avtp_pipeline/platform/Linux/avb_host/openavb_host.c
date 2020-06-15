@@ -66,6 +66,7 @@ extern bool openavbIntfLoggerInitialize(media_q_t *pMediaQ, openavb_intf_cb_t *p
 extern bool openavbIntfNullInitialize(media_q_t *pMediaQ, openavb_intf_cb_t *pIntfCB);
 extern bool openavbIntfToneGenInitialize(media_q_t *pMediaQ, openavb_intf_cb_t *pIntfCB);
 extern bool openavbIntfViewerInitialize(media_q_t *pMediaQ, openavb_intf_cb_t *pIntfCB);
+extern bool openavbIntfAES67Initialize(media_q_t *pMediaQ, openavb_intf_cb_t *pIntfCB);
 
 // Linux interface modules
 extern bool openavbIntfAlsaInitialize(media_q_t *pMediaQ, openavb_intf_cb_t *pIntfCB);
@@ -238,6 +239,7 @@ int main(int argc, char *argv[])
 	registerStaticIntfModule(openavbIntfMpeg2tsGstInitialize);
 	registerStaticIntfModule(openavbIntfH264RtpGstInitialize);
 #endif
+	registerStaticIntfModule(openavbIntfAES67Initialize);
 	tlHandleList = calloc(1, sizeof(tl_handle_t) * tlCount);
 
 	// Open all streams

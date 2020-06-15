@@ -23,6 +23,7 @@ target_link_libraries( openavb_host
 	intf_null
 	intf_tonegen
 	intf_viewer
+	intf_aes67
 	intf_alsa
 	intf_mpeg2ts_file
 	intf_wav_file
@@ -52,6 +53,7 @@ target_link_libraries( openavb_harness
 	intf_null
 	intf_tonegen
 	intf_viewer
+	intf_aes67
 	intf_alsa
 	intf_mpeg2ts_file
 	intf_wav_file
