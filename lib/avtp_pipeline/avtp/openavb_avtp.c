@@ -286,6 +286,26 @@ static openavbRC fillAvtpHdr(avtp_stream_t *pStream, U8 *pFill)
 	AVB_RC_TRACE_RET(OPENAVB_AVTP_SUCCESS, AVB_TRACE_AVTP_DETAIL);
 }
 
+static U64 processTimestampCallback(avtp_stream_t *pStream)
+{
+    U64 timeNsec = 0;
+
+#if IGB_LAUNCHTIME_ENABLED || ATL_LAUNCHTIME_ENABLED
+	if( pStream->pMapCB->map_lt_calc_cb ) {
+		pStream->pMapCB->map_lt_calc_cb(pStream->pMediaQ, &timeNsec);
+	} else {
+		// lets get unmodified timestamp from mediaq item about to be sent by mapping
+		media_q_item_t* item = openavbMediaQTailLock(pStream->pMediaQ, true);
+		if (item) {
+			timeNsec = item->pAvtpTime->timeNsec;
+			openavbMediaQTailUnlock(pStream->pMediaQ);
+		}
+	}
+#endif
+
+    return timeNsec;
+}
+
 /* Send a frame
  */
 openavbRC openavbAvtpTx(void *pv, bool bSend, bool txBlockingInIntf)
@@ -331,18 +351,7 @@ openavbRC openavbAvtpTx(void *pv, bool bSend, bool txBlockingInIntf)
 			// Call interface module to read data
 			pStream->pIntfCB->intf_tx_cb(pStream->pMediaQ);
 
-#if IGB_LAUNCHTIME_ENABLED
-			// lets get unmodified timestamp from mediaq item about to be sent by mapping
-			media_q_item_t* item = openavbMediaQTailLock(pStream->pMediaQ, true);
-			if (item) {
-				timeNsec = item->pAvtpTime->timeNsec;
-				openavbMediaQTailUnlock(pStream->pMediaQ);
-			}
-#elif ATL_LAUNCHTIME_ENABLED
-			if( pStream->pMapCB->map_lt_calc_cb ) {
-				pStream->pMapCB->map_lt_calc_cb(pStream->pMediaQ, &timeNsec);
-			}
-#endif
+			timeNsec = processTimestampCallback(pStream);
 
 			// Call mapping module to move data into AVTP frame
 			txCBResult = pStream->pMapCB->map_tx_cb(pStream->pMediaQ, pAvtpFrame, &avtpFrameLen);
@@ -350,19 +359,7 @@ openavbRC openavbAvtpTx(void *pv, bool bSend, bool txBlockingInIntf)
 			pStream->bytes += avtpFrameLen;
 		}
 		else {
-
-#if IGB_LAUNCHTIME_ENABLED
-			// lets get unmodified timestamp from mediaq item about to be sent by mapping
-			media_q_item_t* item = openavbMediaQTailLock(pStream->pMediaQ, true);
-			if (item) {
-				timeNsec = item->pAvtpTime->timeNsec;
-				openavbMediaQTailUnlock(pStream->pMediaQ);
-			}
-#elif ATL_LAUNCHTIME_ENABLED
-			if( pStream->pMapCB->map_lt_calc_cb ) {
-				pStream->pMapCB->map_lt_calc_cb(pStream->pMediaQ, &timeNsec);
-			}
-#endif
+			timeNsec = processTimestampCallback(pStream);
 
 			// Blocking in interface mode. Pull from media queue for tx first
 			if ((txCBResult = pStream->pMapCB->map_tx_cb(pStream->pMediaQ, pAvtpFrame, &avtpFrameLen)) == TX_CB_RET_PACKET_NOT_READY) {
