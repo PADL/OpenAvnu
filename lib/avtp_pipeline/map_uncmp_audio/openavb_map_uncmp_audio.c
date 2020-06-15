@@ -149,9 +149,10 @@ typedef struct {
 	U8 DBC;
 
 	avb_audio_mcr_t audioMcr;
-#if ATL_LAUNCHTIME_ENABLED
+#if ATL_LAUNCHTIME_ENABLED || IGB_LAUNCHTIME_ENABLED
 	// Transmit interval in nanoseconds.
 	U32 txIntervalNs;
+	U32 packetsSinceAvtpAlignment;
 #endif
 } pvt_data_t;
 
@@ -240,7 +241,7 @@ static void x_calculateSizes(media_q_t *pMediaQ)
 
 		pPubMapInfo->packetSampleSizeBytes = 4;
 
-#if ATL_LAUNCHTIME_ENABLED
+#if ATL_LAUNCHTIME_ENABLED || IGB_LAUNCHTIME_ENABLED
 		pPvtData->txIntervalNs = 1000000000u / pPvtData->txInterval;
 		AVB_LOGF_INFO("LT interval ns:%d", pPvtData->txIntervalNs);
 #endif
@@ -407,41 +408,47 @@ void openavbMapUncmpAudioAVDECCInitCB(media_q_t *pMediaQ, U16 configIdx, U16 des
 	AVB_TRACE_EXIT(AVB_TRACE_MAP);
 }
 
-#if ATL_LAUNCHTIME_ENABLED
-#define ATL_LT_OFFSET 500000
-bool openavbMapUncmpLaunchtimCalculationCB(media_q_t *pMediaQ, U64 *lt)
+#if ATL_LAUNCHTIME_ENABLED || IGB_LAUNCHTIME_ENABLED
+bool openavbMapUncmpLaunchtimeCalculationCB(media_q_t *pMediaQ, U64 *lt)
 {
-static U64 last_time = 0;
-	bool res = false;
-	media_q_item_t* pMediaQItem;
 	pvt_data_t *pPvtData = pMediaQ->pPvtMapInfo;
-	AVB_TRACE_ENTRY(AVB_TRACE_INTF);
-	if (!lt) {
-		AVB_LOG_ERROR("Mapping module launchtime argument incorrect.");
-		return false;
-	}
-	if (!pPvtData) {
-		AVB_LOG_ERROR("Private mapping module data not allocated.");
-		return false;
+	bool res;
+	media_q_item_t *pMediaQItem;
+
+	AVB_TRACE_ENTRY(AVB_TRACE_MAP);
+
+	if (pPvtData->maxTransitUsec == 0) {
+		// Disable packet timestamping if no transit time configured
+		*lt = 0;
+		res = true;
+	} else if ((pMediaQItem = openavbMediaQTailLock(pMediaQ, true)) != NULL) {
+		media_q_pub_map_uncmp_audio_info_t *pPubMapInfo = pMediaQ->pPubMapInfo;
+
+		if (pMediaQItem->readIdx == 0) /* packet and frame align at AVTP time */
+			pPvtData->packetsSinceAvtpAlignment = 0;
+
+		*lt = pMediaQItem->pAvtpTime->timeNsec;
+		*lt += pPvtData->packetsSinceAvtpAlignment * pPvtData->txIntervalNs;
+		pPvtData->packetsSinceAvtpAlignment++;
+
+		// openavbMapUncmpAudioTxCB() will set transit time or the presentation
+		// latency, whichever is greater. Account for a presentation latency
+		// which is greater than the transit time by offsetting the launchtime
+		// by the difference between the two.
+		if (pPubMapInfo->presentationLatencyUSec > pPvtData->maxTransitUsec)
+			*lt += (pPubMapInfo->presentationLatencyUSec - pPvtData->maxTransitUsec) * NANOSECONDS_PER_USEC;
+
+		openavbMediaQTailUnlock(pMediaQ);
+		res = true;
+	} else {
+		res = false;
 	}
 
-	pMediaQItem = openavbMediaQTailLock(pMediaQ, true);
-	if (pMediaQItem) {
-		if (pMediaQItem->readIdx == 0) {
-			last_time = pMediaQItem->pAvtpTime->timeNsec;
-			*lt = last_time + ATL_LT_OFFSET;
-			res = true;
-		} else if( last_time != 0 ) {
-			last_time += pPvtData->txIntervalNs;
-			*lt = last_time + ATL_LT_OFFSET;
-			res = true;
-		}
-		openavbMediaQTailUnlock(pMediaQ);
-	}
-	AVB_TRACE_EXIT(AVB_TRACE_INTF);
+	AVB_TRACE_EXIT(AVB_TRACE_MAP);
+
 	return res;
 }
-#endif
+#endif /* ATL_LAUNCHTIME_ENABLED || IGB_LAUNCHTIME_ENABLED */
 
 // A call to this callback indicates that this mapping module will be
 // a talker. Any talker initialization can be done in this function.
@@ -471,6 +478,18 @@ void openavbMapUncmpAudioTxInitCB(media_q_t *pMediaQ)
 	}
 
 	AVB_TRACE_EXIT(AVB_TRACE_MAP);
+}
+
+static bool swapToHostByteOrderP(media_q_pub_map_uncmp_audio_info_t *pPubMapInfo)
+{
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    return (pPubMapInfo->audioEndian == AVB_AUDIO_ENDIAN_LITTLE ||
+	    pPubMapInfo->audioEndian == AVB_AUDIO_ENDIAN_UNSPEC);
+#elif __BYTE_ORDER == __BIG_ENDIAN
+    return false;
+#else
+#error Unsupported endian format
+#endif
 }
 
 // This talker callback will be called for each AVB observation interval.
@@ -518,17 +537,26 @@ tx_cb_ret_t openavbMapUncmpAudioTxCB(media_q_t *pMediaQ, U8 *pData, U32 *dataLen
 		bool timestampSet = FALSE;		// index of the timestamp
 		U32 sytInt = pPubMapInfo->sytInterval;
 		U8 dbc = pPvtData->DBC;
+		bool bSwapToHostByteOrder = swapToHostByteOrderP(pPubMapInfo);
+
 		while (framesProcessed < pPubMapInfo->framesPerPacket) {
 			pMediaQItem = openavbMediaQTailLock(pMediaQ, TRUE);
 			if (pMediaQItem && pMediaQItem->pPubData && pMediaQItem->dataLen > 0) {
+				U32 framesSent = pMediaQItem->readIdx / pPubMapInfo->itemFrameSizeBytes;
 				U8 *pItemData = (U8 *)pMediaQItem->pPubData + pMediaQItem->readIdx;
 
-				if (pMediaQItem->readIdx == 0) {
+				if (framesSent == 0) {
 					// Timestamp from the media queue is always associated with the first data point.
 
-					// PTP walltime already set in the interface module. Just add the max transit time.
-					openavbAvtpTimeAddUSec(pMediaQItem->pAvtpTime, pPvtData->maxTransitUsec);
+					// PTP walltime already set in the interface module. Just add the max transit time
+					// or the presentation latency, whichever is greater
+					if (pPubMapInfo->presentationLatencyUSec > pPvtData->maxTransitUsec)
+						    openavbAvtpTimeAddUSec(pMediaQItem->pAvtpTime, pPubMapInfo->presentationLatencyUSec);
+					else
+						    openavbAvtpTimeAddUSec(pMediaQItem->pAvtpTime, pPvtData->maxTransitUsec);
+				}
 
+				if ((dbc % sytInt) == 0) {
 					// Set timestamp valid flag
 					if (openavbAvtpTimeTimestampIsValid(pMediaQItem->pAvtpTime))
 						pHdr[HIDX_AVTP_HIDE7_TV1] |= 0x01;      // Set
@@ -541,13 +569,19 @@ tx_cb_ret_t openavbMapUncmpAudioTxCB(media_q_t *pMediaQ, U8 *pData, U32 *dataLen
 						pHdr[HIDX_AVTP_HIDE7_TU1] |= 0x01;      // Set
 					else
 						pHdr[HIDX_AVTP_HIDE7_TU1] &= ~0x01;     // Clear
-
 				}
 
 				while (framesProcessed < pPubMapInfo->framesPerPacket && pMediaQItem->readIdx < pMediaQItem->dataLen) {
 					int i1;
 					for (i1 = 0; i1 < pPubMapInfo->audioChannels; i1++) {
-						if (pPubMapInfo->itemSampleSizeBytes == 2) {
+						if (bSwapToHostByteOrder == false) {
+							*pAVTPDataUnit = pPvtData->AM824_label >> 24;
+							memcpy(pAVTPDataUnit + 1, pItemData, pPubMapInfo->itemSampleSizeBytes);
+							if (pPubMapInfo->itemSampleSizeBytes == 2)
+								pAVTPDataUnit[3] = 0;
+							pAVTPDataUnit += 4;
+							pItemData += pPubMapInfo->itemSampleSizeBytes;
+						} else if (pPubMapInfo->itemSampleSizeBytes == 2) {
 							S32 sample = *(S16 *)pItemData;
 							sample &= 0x0000ffff;
 							sample = sample << 8;
@@ -567,12 +601,16 @@ tx_cb_ret_t openavbMapUncmpAudioTxCB(media_q_t *pMediaQ, U8 *pData, U32 *dataLen
 							pItemData += 3;
 						}
 					}
-					framesProcessed++;
-					if (dbc % sytInt == 0) {
-						*(U32 *)(&pHdr[HIDX_AVTP_TIMESTAMP32]) = htonl(openavbAvtpTimeGetAvtpTimestamp(pMediaQItem->pAvtpTime));
-
+					if ((dbc % sytInt) == 0) {
+						// presentation time of first item in media queue
+						U32 avtpTime = openavbAvtpTimeGetAvtpTimestamp(pMediaQItem->pAvtpTime);
+						// duration of frames processed thus far in media queue
+						double sytDuration = (double)(framesSent + framesProcessed) / (double)pPubMapInfo->audioRate;
+						avtpTime += (uint64_t)round(sytDuration * NANOSECONDS_PER_SECOND);
+						*(U32 *)(&pHdr[HIDX_AVTP_TIMESTAMP32]) = htonl(avtpTime);
 						timestampSet = TRUE;
 					}
+					framesProcessed++;
 					dbc++;
 					pMediaQItem->readIdx += pPubMapInfo->itemFrameSizeBytes;
 				}
@@ -656,6 +694,7 @@ bool openavbMapUncmpAudioRxCB(media_q_t *pMediaQ, U8 *pData, U32 dataLen)
 		U8 dbcIdx = dbc % pPubMapInfo->sytInterval;
 		U8 *pAVTPDataUnit = pPayload;
 		U8 *pAVTPDataUnitEnd = pData + AVTP_V0_HEADER_SIZE + MAP_HEADER_SIZE + payloadLen;
+		bool bSwapToHostByteOrder = swapToHostByteOrderP(pPubMapInfo);
 
 		while (((pAVTPDataUnit + pPubMapInfo->packetFrameSizeBytes) <= pAVTPDataUnitEnd)) {
 			// Get item pointer in media queue
@@ -676,7 +715,7 @@ bool openavbMapUncmpAudioRxCB(media_q_t *pMediaQ, U8 *pData, U32 dataLen)
 
 				if (pMediaQItem->dataLen == 0) {
 					// This is the first set of frames for the media queue item, must align based on SYT_INTERVAL for proper synchronization of listeners
-					if (dbcIdx > 0) {
+					if (dbcIdx % pPubMapInfo->sytInterval) {
 						// Failed to make alignment with this packet. This AVTP packet will be tossed. Once alignment is reached
 						// it is expected not to need to toss packets anymore.
 						openavbMediaQHeadUnlock(pMediaQ);
@@ -687,6 +726,7 @@ bool openavbMapUncmpAudioRxCB(media_q_t *pMediaQ, U8 *pData, U32 dataLen)
 					// Set time stamp info on first data write to the media queue
 					// place it in the media queue item.
 					openavbAvtpTimeSetToTimestamp(pMediaQItem->pAvtpTime, timestamp);
+					openavbAvtpTimeSubUSec(pMediaQItem->pAvtpTime, pPubMapInfo->presentationLatencyUSec);
 
 					// Set timestamp valid and timestamp uncertain flags
 					openavbAvtpTimeSetTimestampValid(pMediaQItem->pAvtpTime, tsValid);
@@ -696,7 +736,12 @@ bool openavbMapUncmpAudioRxCB(media_q_t *pMediaQ, U8 *pData, U32 dataLen)
 				while (((pAVTPDataUnit + pPubMapInfo->packetFrameSizeBytes) <= pAVTPDataUnitEnd) && ((pItemData + pPubMapInfo->itemFrameSizeBytes) <= pItemDataEnd)) {
 					int i1;
 					for (i1 = 0; i1 < pPubMapInfo->audioChannels; i1++) {
-						if (pPubMapInfo->itemSampleSizeBytes == 2) {
+						if (bSwapToHostByteOrder == false) {
+							memcpy(pItemData, pAVTPDataUnit + 1, pPubMapInfo->itemSampleSizeBytes);
+							pAVTPDataUnit += 4;
+							pItemData += pPubMapInfo->itemSampleSizeBytes;
+							itemSizeWritten += pPubMapInfo->itemSampleSizeBytes;
+						} else if (pPubMapInfo->itemSampleSizeBytes == 2) {
 							S32 sample = ntohl(*(S32 *)pAVTPDataUnit);
 							sample = sample * 1;
 							*(S16 *)(pItemData) = (sample & 0x00ffffff) >> 8;
@@ -785,8 +830,8 @@ extern DLL_EXPORT bool openavbMapUncmpAudioInitialize(media_q_t *pMediaQ, openav
 		pMapCB->map_rx_cb = openavbMapUncmpAudioRxCB;
 		pMapCB->map_end_cb = openavbMapUncmpAudioEndCB;
 		pMapCB->map_gen_end_cb = openavbMapUncmpAudioGenEndCB;
-#if ATL_LAUNCHTIME_ENABLED
-		pMapCB->map_lt_calc_cb = openavbMapUncmpLaunchtimCalculationCB;
+#if ATL_LAUNCHTIME_ENABLED || IGB_LAUNCHTIME_ENABLED
+		pMapCB->map_lt_calc_cb = openavbMapUncmpLaunchtimeCalculationCB;
 #endif
 
 		pPvtData->itemCount = 20;
