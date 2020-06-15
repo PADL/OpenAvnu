@@ -208,7 +208,7 @@ bool atlRawsockTxFrameReady(void *pvRawsock, U8 *pBuffer, unsigned int len, U64 
 #if ATL_LAUNCHTIME_ENABLED
 	gptpmaster2local(&gPtpTD, timeNsec, &rawsock->tx_packet->attime);
 #else
-    rawsock->tx_packet->attime = 0;
+	rawsock->tx_packet->attime = 0;
 #endif
 	err = atl_xmit(rawsock->atl_dev, rawsock->queue, &rawsock->tx_packet);
 	if (err) {

@@ -92,6 +92,7 @@ if (DEFINED AVB_FEATURE_AVDECC)
 		set ( AVB_FEATURE_IGB 0 )
 		set ( AVB_FEATURE_ATL 0 )
 		set ( IGB_LAUNCHTIME_ENABLED 0 )
+		set ( PTP_CLOCK_DIRECT 1 )
 	endif ()
 endif ()
 
@@ -130,6 +131,9 @@ if (NOT DEFINED ATL_LAUNCHTIME_ENABLED)
 endif ()
 set ( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DATL_LAUNCHTIME_ENABLED=${ATL_LAUNCHTIME_ENABLED}" )
 
+if (NOT DEFINED PTP_CLOCK_DIRECT)
+  set ( PTP_CLOCK_DIRECT 1 )
+endif ()
 
 # Export feature flags for sub-builds
 if (AVB_FEATURE_FQTSS)
@@ -155,6 +159,9 @@ if (AVB_FEATURE_ATL)
 	set ( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DAVB_FEATURE_ATL=1" )
 else ()
 	set ( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DAVB_FEATURE_ATL=0" )
+endif ()
+if (PTP_CLOCK_DIRECT)
+  set ( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DPTP_CLOCK_DIRECT=1" )
 endif ()
 
 #Export Platform defines
@@ -373,6 +380,7 @@ if (NOT AVB_FEATURE_AVDECC)
 	endmacro()
 
 	add_intf_mod_platform ( "intf_alsa" )
+	add_intf_mod_platform ( "intf_aes67" )
 	if (AVB_FEATURE_GSTREAMER)
 		add_intf_mod_platform ( "intf_mpeg2ts_gst" )
 		add_intf_mod_platform ( "intf_mjpeg_gst" )

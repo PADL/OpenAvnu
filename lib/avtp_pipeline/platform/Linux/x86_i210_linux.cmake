@@ -12,6 +12,7 @@ else ()
 	set ( GSTREAMER_1_0 0 )
 endif ()
 
+set ( PTP_CLOCK_DIRECT 1 )
 
 # and another kernel sources
 #set ( LINUX_KERNEL_DIR "/usr/src/kernel" )
@@ -44,6 +45,7 @@ if (AVB_FEATURE_IGB)
 	set ( PLATFORM_LINK_LIBRARIES
 		igb
 		pci
+		rt
 	)
 endif ()
 

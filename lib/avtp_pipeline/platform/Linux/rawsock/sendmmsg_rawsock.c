@@ -46,6 +46,13 @@ https://github.com/benhoyt/inih/commit/74d2ca064fb293bc60a77b0bd068075b293cf175.
 #define	AVB_LOG_COMPONENT	"Raw Socket"
 #include "openavb_log.h"
 
+#if USE_LAUNCHTIME
+#include "avb_gptp.h"
+
+// needed for gptplocaltime()
+extern gPtpTimeData gPtpTD;
+#endif
+
 static void fillmsghdr(struct msghdr *msg, struct iovec *iov,
 #if USE_LAUNCHTIME
 					   unsigned char *cmsgbuf, uint64_t time,
@@ -59,6 +66,8 @@ static void fillmsghdr(struct msghdr *msg, struct iovec *iov,
 	iov->iov_len = pktlen;
 	msg->msg_iov = iov;
 	msg->msg_iovlen = 1;
+
+	gptpmaster2local(&gPtpTD, time, &time);
 
 #if USE_LAUNCHTIME
 	{

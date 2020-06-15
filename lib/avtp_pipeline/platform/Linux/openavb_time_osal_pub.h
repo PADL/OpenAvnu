@@ -36,7 +36,7 @@ https://github.com/benhoyt/inih/commit/74d2ca064fb293bc60a77b0bd068075b293cf175.
 #include <sys/timerfd.h>
 #include <time.h>
 
-#define AVB_TIME_INIT() osalAVBTimeInit()
+#define AVB_TIME_INIT() osalAVBTimeInit(NULL)
 #define AVB_TIME_CLOSE() osalAVBTimeClose()
 
 #define TIMERFD_CREATE(arg1, arg2) timerfd_create(arg1, arg2)
@@ -45,9 +45,9 @@ https://github.com/benhoyt/inih/commit/74d2ca064fb293bc60a77b0bd068075b293cf175.
 
 // In this Linux port all clock IDs preceding OPENAVB_CLOCK_WALLTIME will be set to clock_gettime()
 typedef enum {
-	OPENAVB_CLOCK_REALTIME,
-	OPENAVB_CLOCK_MONOTONIC,
-	OPENAVB_TIMER_CLOCK,
+	OPENAVB_CLOCK_REALTIME = CLOCK_REALTIME,
+	OPENAVB_CLOCK_MONOTONIC = CLOCK_MONOTONIC,
+	OPENAVB_TIMER_CLOCK = 16,
 	OPENAVB_CLOCK_WALLTIME
 } openavb_clockId_t;
 
@@ -55,7 +55,7 @@ typedef enum {
 #define CLOCK_GETTIME64(arg1, arg2) osalClockGettime64(arg1, arg2)
 
 // Initialize the AVB Time system for client usage
-bool osalAVBTimeInit(void);
+bool osalAVBTimeInit(const char *interfaceName);
 
 // Close the AVB Time system for client usage
 bool osalAVBTimeClose(void);

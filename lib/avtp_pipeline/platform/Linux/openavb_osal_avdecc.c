@@ -55,7 +55,7 @@ extern DLL_EXPORT bool osalAvdeccInitialize(const char* logfilename, const char*
 	}
 
 	avbLogInitEx(s_logfile);
-	osalAVBTimeInit();
+	osalAVBTimeInit(ifname);
 	if (!osalAVBGrandmasterInit()) { return FALSE; }
 	if (!startAvdecc(ifname, inifiles, numfiles)) { return FALSE; }
 	return TRUE;

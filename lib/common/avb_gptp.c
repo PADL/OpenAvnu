@@ -123,6 +123,9 @@ bool gptplocaltime(const gPtpTimeData * td, uint64_t* now_local)
 	if (clock_gettime(CLOCK_REALTIME, &sys_time) != 0)
 		return false;
 
+	if (td->ls_freqoffset == 0)
+		return false; /* this would return stale information */
+
 	now_system = (uint64_t)sys_time.tv_sec * 1000000000ULL + (uint64_t)sys_time.tv_nsec;
 
 	system_time = td->local_time + td->ls_phoffset;
