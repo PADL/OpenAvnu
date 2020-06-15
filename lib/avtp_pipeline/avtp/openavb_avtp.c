@@ -522,7 +522,7 @@ static void x_avtpRxFrame(avtp_stream_t *pStream, U8 *pFrame, U32 frameLen)
 			pStream->pMapCB->map_rx_cb(pStream->pMediaQ, pFrame, frameLen);
 
 			// NOTE : This is a redundant call. It is handled in avtpTryRx()
-			// pStream->pIntfCB->intf_rx_cb(pStream->pMediaQ);
+			pStream->pIntfCB->intf_rx_cb(pStream->pMediaQ);
 
 			pStream->info.rx.bComplete = TRUE;
 
