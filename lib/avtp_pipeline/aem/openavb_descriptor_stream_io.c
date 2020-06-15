@@ -44,6 +44,8 @@ https://github.com/benhoyt/inih/commit/74d2ca064fb293bc60a77b0bd068075b293cf175.
 #include "openavb_rawsock.h"
 #include "openavb_aem.h"
 #include "openavb_descriptor_stream_io.h"
+#include "openavb_audio_pub.h"
+#include "openavb_aaf_pub.h"
 
 ////////////////////////////////
 // Private (internal) functions
@@ -359,10 +361,41 @@ static void fillInStreamFormat(openavb_aem_descriptor_stream_io_t *pDescriptor, 
 	{
 		pDescriptor->stream_formats[0].v = 0;
 		pDescriptor->stream_formats[0].subtype = OPENAVB_AEM_STREAM_FORMAT_AVTP_AUDIO_SUBTYPE;
-		pDescriptor->stream_formats[0].subtypes.avtp_audio.nominal_sample_rate = 0x05;
+		switch (pConfig->stream->audioRate) {
+			case AVB_AUDIO_RATE_8KHZ:
+				pDescriptor->stream_formats[0].subtypes.avtp_audio.nominal_sample_rate = AAF_RATE_8K;
+				break;
+			case AVB_AUDIO_RATE_16KHZ:
+				pDescriptor->stream_formats[0].subtypes.avtp_audio.nominal_sample_rate = AAF_RATE_16K;
+				break;
+			case AVB_AUDIO_RATE_24KHZ:
+				pDescriptor->stream_formats[0].subtypes.avtp_audio.nominal_sample_rate = AAF_RATE_24K;
+				break;
+			case AVB_AUDIO_RATE_32KHZ:
+				pDescriptor->stream_formats[0].subtypes.avtp_audio.nominal_sample_rate = AAF_RATE_32K;
+				break;
+			case AVB_AUDIO_RATE_44_1KHZ:
+				pDescriptor->stream_formats[0].subtypes.avtp_audio.nominal_sample_rate = AAF_RATE_44K1;
+				break;
+			case AVB_AUDIO_RATE_48KHZ:
+				pDescriptor->stream_formats[0].subtypes.avtp_audio.nominal_sample_rate = AAF_RATE_48K;
+				break;
+			case AVB_AUDIO_RATE_88_2KHZ:
+				pDescriptor->stream_formats[0].subtypes.avtp_audio.nominal_sample_rate = AAF_RATE_88K2;
+				break;
+			case AVB_AUDIO_RATE_96KHZ:
+				pDescriptor->stream_formats[0].subtypes.avtp_audio.nominal_sample_rate = AAF_RATE_96K;
+				break;
+			case AVB_AUDIO_RATE_176_4KHZ:
+				pDescriptor->stream_formats[0].subtypes.avtp_audio.nominal_sample_rate = AAF_RATE_176K4;
+				break;
+			case AVB_AUDIO_RATE_192KHZ:
+				pDescriptor->stream_formats[0].subtypes.avtp_audio.nominal_sample_rate = AAF_RATE_192K;
+				break;
+		}
 		pDescriptor->stream_formats[0].subtypes.avtp_audio.format = 2;
-		pDescriptor->stream_formats[0].subtypes.avtp_audio.bit_depth = 32;
-		pDescriptor->stream_formats[0].subtypes.avtp_audio.channels_per_frame = 2;
+		pDescriptor->stream_formats[0].subtypes.avtp_audio.bit_depth = pConfig->stream->audioBitDepth;
+		pDescriptor->stream_formats[0].subtypes.avtp_audio.channels_per_frame = pConfig->stream->audioChannels;
 		pDescriptor->stream_formats[0].subtypes.avtp_audio.samples_per_frame = 6;
 	}
 	else if (strcmp(pConfig->stream->map_fn,"openavbMapUncmpAudioInitialize") == 0)
@@ -372,20 +405,34 @@ static void fillInStreamFormat(openavb_aem_descriptor_stream_io_t *pDescriptor, 
 		pDescriptor->stream_formats[0].subtypes.iec_61883_iidc.sf = 1;
 		pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.fmt = OPENAVB_AEM_STREAM_FORMAT_FMT_61883_6;
 		pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.fdf_evt = OPENAVB_AEM_STREAM_FORMAT_FDF_EVT_61883_6_AM824;
-		/*
-		 *      static sampling rate. Requires fixing. 0x02 = 48kHz, 0x04 = 96kHz
-		 */
-		pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.fdf_sfc = 0x02;
-		/*
-		 *      static channel count. Requires fixing. 0x08 = 8 channels
-		 */
-		pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.dbs = 0x08;
+		switch (pConfig->stream->audioRate) {
+			case AVB_AUDIO_RATE_32KHZ:
+				pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.fdf_sfc = 0x00;
+				break;
+			case AVB_AUDIO_RATE_44_1KHZ:
+				pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.fdf_sfc = 0x01;
+				break;
+			case AVB_AUDIO_RATE_88_2KHZ:
+				pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.fdf_sfc = 0x03;
+				break;
+			case AVB_AUDIO_RATE_96KHZ:
+				pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.fdf_sfc = 0x04;
+				break;
+			case AVB_AUDIO_RATE_176_4KHZ:
+				pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.fdf_sfc = 0x05;
+				break;
+			case AVB_AUDIO_RATE_192KHZ:
+				pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.fdf_sfc = 0x06;
+				break;
+			case AVB_AUDIO_RATE_48KHZ:
+			default:
+				pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.fdf_sfc = 0x02;
+				break;
+		}
+		pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.dbs = pConfig->stream->audioChannels;
 		pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.b = 0x00;
 		pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.nb = 0x01;
 		pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.label_iec_60958_cnt = 0;
-		/*
-		 *      static channel count. Requires fixing. 0x08 = 8 channels
-		 */
 		pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.label_mbla_cnt = pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.dbs;
 		pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.label_midi_cnt = 0;
 		pDescriptor->stream_formats[0].subtypes.iec_61883_6_am824.label_smptecnt = 0;

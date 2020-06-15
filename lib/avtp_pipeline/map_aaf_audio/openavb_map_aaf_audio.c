@@ -41,6 +41,7 @@ https://github.com/benhoyt/inih/commit/74d2ca064fb293bc60a77b0bd068075b293cf175.
 #include "openavb_types_pub.h"
 #include "openavb_trace_pub.h"
 #include "openavb_avtp_time_pub.h"
+#include "openavb_aaf_pub.h"
 #include "openavb_mediaq_pub.h"
 #include "openavb_map_pub.h"
 #include "openavb_map_aaf_audio_pub.h"
@@ -70,45 +71,6 @@ https://github.com/benhoyt/inih/commit/74d2ca064fb293bc60a77b0bd068075b293cf175.
 // - 1 Byte - SP bit (sparse mode)
 #define HIDX_AVTP_HIDE7_SP			22
 #define SP_M0_BIT					(1 << 4)
-
-typedef enum {
-	AAF_RATE_UNSPEC = 0,
-	AAF_RATE_8K,
-	AAF_RATE_16K,
-	AAF_RATE_32K,
-	AAF_RATE_44K1,
-	AAF_RATE_48K,
-	AAF_RATE_88K2,
-	AAF_RATE_96K,
-	AAF_RATE_176K4,
-	AAF_RATE_192K,
-	AAF_RATE_24K,
-} aaf_nominal_sample_rate_t;
-
-typedef enum {
-	AAF_FORMAT_UNSPEC = 0,
-	AAF_FORMAT_FLOAT_32,
-	AAF_FORMAT_INT_32,
-	AAF_FORMAT_INT_24,
-	AAF_FORMAT_INT_16,
-	AAF_FORMAT_AES3_32, // AVDECC_TODO:  Implement this
-} aaf_sample_format_t;
-
-typedef enum {
-	AAF_STATIC_CHANNELS_LAYOUT	= 0,
-	AAF_MONO_CHANNELS_LAYOUT	= 1,
-	AAF_STEREO_CHANNELS_LAYOUT	= 2,
-	AAF_5_1_CHANNELS_LAYOUT		= 3,
-	AAF_7_1_CHANNELS_LAYOUT		= 4,
-	AAF_MAX_CHANNELS_LAYOUT		= 15,
-} aaf_automotive_channels_layout_t;
-
-typedef enum {
-	// Disabled - timestamp is valid in every avtp packet
-	TS_SPARSE_MODE_DISABLED		= 0,
-	// Enabled - timestamp is valid in every 8th avtp packet
-	TS_SPARSE_MODE_ENABLED		= 1
-} avb_audio_sparse_mode_t;
 
 typedef struct {
 	/////////////
