@@ -54,9 +54,7 @@ extern gPtpTimeData gPtpTD;
 #endif
 
 static void fillmsghdr(struct msghdr *msg, struct iovec *iov,
-#if USE_LAUNCHTIME
 					   unsigned char *cmsgbuf, uint64_t time,
-#endif
 					   void *pktdata, size_t pktlen)
 {
 	msg->msg_name = NULL;
@@ -67,8 +65,7 @@ static void fillmsghdr(struct msghdr *msg, struct iovec *iov,
 	msg->msg_iov = iov;
 	msg->msg_iovlen = 1;
 
-	gptpmaster2local(&gPtpTD, time, &time);
-
+	if (time)
 #if USE_LAUNCHTIME
 	{
 		struct cmsghdr *cmsg;
@@ -89,7 +86,7 @@ static void fillmsghdr(struct msghdr *msg, struct iovec *iov,
 		cmsg->cmsg_len = CMSG_LEN(sizeof time);
 
 		tsptr = (uint64_t *)CMSG_DATA(cmsg);
-		*tsptr = time;
+		gptpmaster2local(&gPtpTD, time, tsptr);
 	}
 #else
 	msg->msg_control = NULL;
@@ -323,19 +320,8 @@ bool sendmmsgRawsockTxFrameReady(void *pvRawsock, U8 *pBuffer, unsigned int len,
 	bufidx = rawsock->buffersReady;
 	assert(pBuffer == rawsock->pktbuf[bufidx]);
 
-#if USE_LAUNCHTIME
-	if (!timeNsec) {
-		IF_LOG_INTERVAL(1000) AVB_LOG_WARNING("launch time is enabled but not passed to TxFrameReady");
-	}
 	fillmsghdr(&(rawsock->mmsg[bufidx].msg_hdr), &(rawsock->miov[bufidx]), rawsock->cmsgbuf[bufidx],
 			   timeNsec, rawsock->pktbuf[bufidx], len);
-#else
-	if (timeNsec) {
-		IF_LOG_INTERVAL(1000) AVB_LOG_WARNING("launch time is not enabled but was passed to TxFrameReady");
-	}
-	fillmsghdr(&(rawsock->mmsg[bufidx].msg_hdr), &(rawsock->miov[bufidx]), rawsock->pktbuf[bufidx], len);
-#endif
-
 
 	rawsock->buffersReady += 1;
 

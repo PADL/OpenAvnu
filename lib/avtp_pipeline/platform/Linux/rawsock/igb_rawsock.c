@@ -208,7 +208,8 @@ bool igbRawsockTxFrameReady(void *pvRawsock, U8 *pBuffer, unsigned int len, U64 
 	rawsock->tx_packet->len = len;
 
 #if IGB_LAUNCHTIME_ENABLED
-	gptpmaster2local(&gPtpTD, timeNsec, &rawsock->tx_packet->attime);
+	if (timeNsec)
+		gptpmaster2local(&gPtpTD, timeNsec, &rawsock->tx_packet->attime);
 #endif
 
 	err = igb_xmit(rawsock->igb_dev, rawsock->queue, rawsock->tx_packet);
