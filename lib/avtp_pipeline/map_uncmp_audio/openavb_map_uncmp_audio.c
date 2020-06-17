@@ -260,8 +260,9 @@ static void x_calculateSizes(media_q_t *pMediaQ)
 		}
 		else if (pPubMapInfo->audioBitDepth == AVB_AUDIO_BIT_DEPTH_24BIT) {
 			pPubMapInfo->itemSampleSizeBytes = 3;
-		}
-		else {
+		} else if (pPubMapInfo->audioBitDepth == AVB_AUDIO_BIT_DEPTH_AM824) {
+			pPubMapInfo->itemSampleSizeBytes = 4;
+		} else {
 			AVB_LOGF_ERROR("Invalid audio format configured: %u", pPubMapInfo->audioBitDepth);
 			pPubMapInfo->itemSampleSizeBytes = 1;
 		}
@@ -590,8 +591,7 @@ tx_cb_ret_t openavbMapUncmpAudioTxCB(media_q_t *pMediaQ, U8 *pData, U32 *dataLen
 							*(U32 *)(pAVTPDataUnit) = sample;
 							pAVTPDataUnit += 4;
 							pItemData += 2;
-						}
-						else {
+						} else if (pPubMapInfo->itemSampleSizeBytes == 3) {
 							S32 sample = *(S32 *)pItemData;
 							sample &= 0x00ffffff;
 							sample |= pPvtData->AM824_label;
@@ -599,6 +599,11 @@ tx_cb_ret_t openavbMapUncmpAudioTxCB(media_q_t *pMediaQ, U8 *pData, U32 *dataLen
 							*(U32 *)(pAVTPDataUnit) = sample;
 							pAVTPDataUnit += 4;
 							pItemData += 3;
+						} else if (pPubMapInfo->itemSampleSizeBytes == 4) {
+							S32 sample = *(S32 *)pItemData;
+							*(U32 *)(pAVTPDataUnit) = htonl(sample);
+							pAVTPDataUnit += 4;
+							pItemData += 4;
 						}
 					}
 					if ((dbc % sytInt) == 0) {
@@ -748,14 +753,18 @@ bool openavbMapUncmpAudioRxCB(media_q_t *pMediaQ, U8 *pData, U32 dataLen)
 							pAVTPDataUnit += 4;
 							pItemData += 2;
 							itemSizeWritten += 2;
-						}
-						else {
+						} else if (pPubMapInfo->itemSampleSizeBytes == 3) {
 							S32 sample = ntohl(*(S32 *)pAVTPDataUnit);
 							sample = sample * 1;
 							*(S32 *)(pItemData) = sample & 0x00ffffff;
 							pAVTPDataUnit += 4;
 							pItemData += 3;
 							itemSizeWritten += 3;
+						} else if (pPubMapInfo->itemSampleSizeBytes == 4) {
+							*(S32 *)(pItemData) = ntohl(*(S32 *)pAVTPDataUnit);
+							pAVTPDataUnit += 4;
+							pItemData += 4;
+							itemSizeWritten += 4;
 						}
 					}
 				}

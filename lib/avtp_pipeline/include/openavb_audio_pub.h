@@ -122,7 +122,9 @@ typedef enum {
 	/// 48 bit
 	AVB_AUDIO_BIT_DEPTH_48BIT	= 48,
 	/// 64 bit
-	AVB_AUDIO_BIT_DEPTH_64BIT	= 64
+	AVB_AUDIO_BIT_DEPTH_64BIT	= 64,
+	/// AM824 bit transparency
+	AVB_AUDIO_BIT_DEPTH_AM824	= -824
 } avb_audio_bit_depth_t;
 
 /** Number of channels
