@@ -977,6 +977,7 @@ updatePackingFactorIntf(media_q_t *pMediaQ)
     if (pPvtData->packingFactor == 0) {
 	AVB_LOGF_ERROR("RTP packet duration (%fus) cannot be shorter than AVTP packet duration (%fus)",
 		       pPvtData->packetTimeUSec, pPvtData->packetTimeUSec);
+	pPvtData->packingFactor = 1;
     }
 
     return pPvtData->packingFactor > 0;
