@@ -22,9 +22,9 @@ RTP timestamps packets with the media clock (which with the addition of an offse
 
 ## Bridge
 
-Having established this, it should be possible to bridge between the two protocols without re-clocking the audio as long as all endpoints share a common PTP clock domain (and media clock, in the case of AVB). There bridge only uses the PTP time for determining the media clock offset, otherwise it can operate quasi-asynchronously (of course, it cannot miss a deadline, and ideally it will send packets at a fixed interval). One current limitation is that AES67 must be the AVB media clock master: if the AVB is running the media clock, it would need to run at exactly the sample rate (relative to the PTP clock), and use a statically configurable offset against the PTP time. 
+Having established this, it should be possible to bridge between the two protocols without re-clocking the audio as long as all endpoints share a common PTP clock domain (and media clock, in the case of AVB). The bridge only uses the PTP time for determining the media clock offset, otherwise it can operate quasi-asynchronously (of course, it cannot miss a deadline, and ideally it will send packets at a fixed interval). One current limitation is that AES67 must be the AVB media clock master: if the AVB is running the media clock, it would need to run at exactly the frequency (relative to the PTP clock), and use a statically configurable offset against the PTP time. 
 
-The bridge requires a PTP boundary clock (BC) that can handle multiple profiles of PTP simultaneously: the Linux PTP project (`ptp4l`) is one such implementation. I extended it to support multiple PTP ports over a single interface; this allows a common physical hardware clock (PHC) to be used across both profiles of PTP. This is useful for testing. A practical deployment would likely use separate networks for AVB and AES67. A stable clock would be best implemented with a multi-port NIC with a single PHC; I'm not aware of any that also support multiple hardware queues and hardware timestamping. (An alternative is a bunch of Intel i210s that have their clock GPIO pins tied together, with `ts2phc`.)
+The bridge requires a PTP boundary clock (BC) that can handle multiple profiles of PTP simultaneously: the Linux PTP project (`ptp4l`) is one such implementation. I extended it to support multiple PTP ports over a single interface; this allows a common physical hardware clock (PHC) to be used across both profiles of PTP. This is useful for testing. A practical deployment would likely use separate networks for AVB and AES67. A stable clock would be best implemented with a multi-port NIC with a single PHC; I'm not aware of any that also support multiple hardware queues and hardware timestamping. (An alternative is a bunch of Intel i210s that have their clock SDP pins tied together, with `ts2phc`.)
 
 The AES to AES67 Bridge is implemented as an interface module for the OpenAvnu AVTP pipeline (originally the EAVB stack from Symphony Teleca Corporation, now Harman). Whilst it does require some configuration, it is flexible, easily to debug, and also implements the discovery components of AVB (AVDECC).
 
@@ -65,7 +65,7 @@ CRR:4.35171e-06
 
 The first line indicates the grandmaster clock ID and the closest master clock ID, respectively. The other values appear to indicate the phase difference, priority, path delay and frequency difference.
 
-Sometimes I see an issue where it flaps between a PTP listener and slave. Restarting `ptp4l` seems to help fix this. You can turn up PTP debugging with `switchd2 -d PTP 9`. Logs are written to `/var/log/messages`.
+Sometimes I see an issue where it flaps between the `LISTENING` and `SLAVE` states. Restarting `ptp4l` seems to help fix this. You can turn up PTP debugging with `switchd2 -d PTP 9`. Logs are written to `/var/log/messages`.
 
 The AVB configuration can also be validated by typing `cat /proc/avb`.
 
@@ -87,7 +87,7 @@ If you are running AVB and AES67 over the same interface, you should reduce the 
 
 Bridge configuration files live in `lib/avtp_pipeline/platform/Linux/intf_aes67/aes67_{listener,talker.ini}` and are installed into the `build/bin` directory. You will need to be comfortable editing configuration files and, most likely, running code under the debugger to use it.
 
-It is important to configure the _packing factor_, or ratio of RTP to AVTP packets, correctly. With a default Class A AVTP transmission interval of 8000pps, the packet duration is 125us. RTP will typically use an interval of 1000pps (packet duration 1ms). Thus the packing factor `map_nv_packing_factor` should be set to 8 in both talker and listener, although the bridge will attempt to determine it itself. I have not tested the case where the RTP packet duration is _shorter_ than the AVTP one, but this is unlikely to happen in practice. A 1:1 ratio (packing factor of one) should in theory work, but it hasn't been tested. Dante devices in AES67 mode default to a packet time of 1ms which I don't believe is configurable, at least not without Dante Domain Manager.
+It is important to configure the _packing factor_, or ratio of RTP to AVTP packets, correctly. With a default Class A AVTP transmission interval of 8000pps, the packet duration is 125us. RTP will typically use an interval of 1000pps (packet duration 1ms). Thus the packing factor `map_nv_packing_factor` should be set to 8 in both talker and listener, although the bridge will attempt to determine it itself. Having the RTP packet duration being shorter than the AVTP one (fractional packing factor) is not supported. A 1:1 ratio (packing factor of one) should in theory work, but it hasn't been tested. Dante devices in AES67 mode default to a packet time of 1ms which I don't believe is configurable, at least not without Dante Domain Manager.
 
 #### Talker
 
@@ -99,7 +99,7 @@ The sampling frequency in samples per second, e.g. 48000. I have not tested othe
 
 ##### intf_nv_audio_bit_depth
 
-The bit depth; only 16 and 24 are supported. This can also take the special value am824 to select the RTP payload format for transparent transport of AES3 audio data defined by RAVENNA. The latter setting is only valid with the 61883-6 mapper.
+The bit depth; only 16 and 24 are supported. This can also take the special value `am824` to select the RTP payload format for transparent transport of AES3 audio data defined by RAVENNA. The latter setting is only valid with the 61883-6 mapper.
 
 ##### intf_nv_audio_channels
 
@@ -128,6 +128,10 @@ The multicast IP address to which to send RTP packets.
 ##### intf_nv_aes67_hwtstamp
 
 A boolean value which can be used to disable hardware timestamping on outgoing RTP packets. This must be disabled if the AES67 interface does not share a PHC with the AVB one, as the offset information from the latter is used to resolve a PTP time to a local one. (This can be fixed eventually by querying `ptp4l` using the management interface, which would allow retrieving the offsets for the correct clock port.)
+
+##### intf_nv_aes67_socket_priority
+
+The socket priority for outgoing RTP packets. Only useful if you have mapped priorities to traffic classes, and traffic classes to queues, using `tc qdisc`.
 
 ## Testing
 
