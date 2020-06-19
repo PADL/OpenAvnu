@@ -757,6 +757,9 @@ sessionDescriptionChangedFromCurrentConfig(aes67_pvt_data_t *pPvtData, openavb_l
     case MAST_ENCODING_L24:
 	audioBitDepth = AVB_AUDIO_BIT_DEPTH_24BIT;
 	break;
+    case MAST_ENCODING_L32:
+	audioBitDepth = AVB_AUDIO_BIT_DEPTH_32BIT;
+	break;
     case MAST_ENCODING_AM824:
 	audioBitDepth = AVB_AUDIO_BIT_DEPTH_AM824;
 	break;
@@ -866,6 +869,9 @@ sapMakeAnnouncement(aes67_pvt_data_t *pPvtData)
 	break;
     case AVB_AUDIO_BIT_DEPTH_24BIT:
 	mast_sdp_set_encoding(sdp, MAST_ENCODING_L24);
+	break;
+    case AVB_AUDIO_BIT_DEPTH_32BIT:
+	mast_sdp_set_encoding(sdp, MAST_ENCODING_L32);
 	break;
     case AVB_AUDIO_BIT_DEPTH_AM824:
 	mast_sdp_set_encoding(sdp, MAST_ENCODING_AM824);
@@ -1159,7 +1165,7 @@ openavbIntfAES67CfgCB(media_q_t *pMediaQ, const char *name, const char *value)
 	} else {
 	    val = strtoul(value, &pEnd, 10);
 
-	    if (val >= AVB_AUDIO_BIT_DEPTH_16BIT && val <= AVB_AUDIO_BIT_DEPTH_24BIT)
+	    if (val >= AVB_AUDIO_BIT_DEPTH_16BIT && val <= AVB_AUDIO_BIT_DEPTH_32BIT)
 		pPvtData->audioBitDepth = val;
 	}
     } else if (strcmp(name, "intf_nv_audio_channels") == 0) {
@@ -1535,6 +1541,7 @@ setSocketHwTs(mast_socket_t *sock, bool tx)
     else
 	tsFlags |= SOF_TIMESTAMPING_RX_HARDWARE;
 
+    /* NB: we are assuming the PTP daemon or something has enabled HWTS for the interface */
     return setsockopt(sock->fd, SOL_SOCKET, SO_TIMESTAMPING,
 		      &tsFlags, sizeof(tsFlags)) == 0;
 }

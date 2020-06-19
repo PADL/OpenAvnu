@@ -149,6 +149,7 @@ const char* mast_encoding_names[MAST_ENCODING_MAX] = {
     [MAST_ENCODING_L8] = "L8",
     [MAST_ENCODING_L16] = "L16",
     [MAST_ENCODING_L24] = "L24",
+    [MAST_ENCODING_L32] = "L32",
     [MAST_ENCODING_PCMU] = "PCMU",
     [MAST_ENCODING_PCMA] = "PCMA",
     [MAST_ENCODING_G722] = "G722",

@@ -378,6 +378,7 @@ void mast_sdp_set_encoding(mast_sdp_t *sdp, int encoding)
     case MAST_ENCODING_L24:
         sdp->sample_size = 24;
         break;
+    case MAST_ENCODING_L32:
     case MAST_ENCODING_AM824:
 	sdp->sample_size = 32;
 	break;
