@@ -604,7 +604,7 @@ sdpToString(mast_sdp_t *sdp, char *buffer, size_t buflen)
 }
 
 static bool
-getLocalPtpClockGrandmasterID(char ptp_gmid[24], uint8_t *domain)
+getLocalPtpClockGrandmaster(char ptp_gmid[24], uint8_t *domain)
 {
     uint8_t gmid[8];
 
@@ -731,6 +731,16 @@ rtpInitializeMediaClock(aes67_pvt_data_t *pPvtData, mast_sdp_t *sdp)
 		   pPvtData->mediaClock, sdp->clock_offset);
 }
 
+static bool
+sessionDescriptionGrandmasterChangedFromCurrentConfig(aes67_pvt_data_t *pPvtData, openavb_list_node_t node)
+{
+    mast_sdp_t *sdp = sessionDescriptionFromNode(node);
+
+    return memcmp(sdp->ptp_gmid, pPvtData->ptpGmId, sizeof(pPvtData->ptpGmId)) != 0 ||
+	sdp->ptp_domain != pPvtData->ptpDomain;
+}
+
+
 /*
  * Returns true if the session description in node is different from our current
  * configuration in bit depth, sample rate or channel count.
@@ -785,9 +795,17 @@ sessionDescriptionChangedFromCurrentConfig(aes67_pvt_data_t *pPvtData, openavb_l
 			  pPvtData->audioChannels, sdp->channel_count);
 	}
 	bConfigurationChanged = true;
-    } else if (memcmp(sdp->ptp_gmid, pPvtData->ptpGmId, sizeof(pPvtData->ptpGmId)) != 0 ||
-		   sdp->ptp_domain != pPvtData->ptpDomain) {
-	if (bLogChanges) {
+    } else if (sessionDescriptionGrandmasterChangedFromCurrentConfig(pPvtData, node)) {
+	char ptpGmId[24];
+	uint8_t ptpDomain;
+
+	/* refresh local GM ID */
+	if (getLocalPtpClockGrandmaster(ptpGmId, &ptpDomain)) {
+	    memcpy(pPvtData->ptpGmId, ptpGmId, sizeof(ptpGmId));
+	    pPvtData->ptpDomain = ptpDomain;
+	}
+
+	if (bLogChanges && sessionDescriptionGrandmasterChangedFromCurrentConfig(pPvtData, node)) {
 	    AVB_LOGF_WARNING("PTP grandmaster clock mismatch: local is %s:%u but stream is %s:%u",
 			     pPvtData->ptpGmId, pPvtData->ptpDomain,
 			     sdp->ptp_gmid, sdp->ptp_domain);
@@ -842,7 +860,7 @@ sapMakeAnnouncement(aes67_pvt_data_t *pPvtData)
     openavb_list_node_t node;
     mast_sdp_t *sdp;
 
-    if (!getLocalPtpClockGrandmasterID(pPvtData->ptpGmId, &pPvtData->ptpDomain))
+    if (!getLocalPtpClockGrandmaster(pPvtData->ptpGmId, &pPvtData->ptpDomain))
 	return false;
 
     sessionDescriptionListLock(AES67_SDP_CACHE_LOCAL); // {
@@ -1073,7 +1091,6 @@ refreshSubscription(media_q_t *pMediaQ)
 	    sessionDescriptionChangedFromCurrentConfig(pPvtData, pPvtData->sessionDescription);
 
 	mast_socket_close(&pPvtData->rtpSocket);
-	getLocalPtpClockGrandmasterID(pPvtData->ptpGmId, &pPvtData->ptpDomain);
 
 	if (bConfigurationChanged)
 #if 0
@@ -1220,7 +1237,7 @@ openavbIntfAES67TxInitCB(media_q_t *pMediaQ)
 
     AVB_TRACE_ENTRY(AVB_TRACE_INTF);
     AVB_LOGF_DEBUG("Initializing talker on queue %p", pMediaQ);
-    getLocalPtpClockGrandmasterID(pPvtData->ptpGmId, &pPvtData->ptpDomain);
+    getLocalPtpClockGrandmaster(pPvtData->ptpGmId, &pPvtData->ptpDomain);
     pPvtData->avbRole = AVB_ROLE_TALKER;
 
     AVB_TRACE_EXIT(AVB_TRACE_INTF);
