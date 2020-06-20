@@ -117,6 +117,10 @@ typedef struct {
 
 	bool mediaQItemSyncTS;
 
+#if ATL_LAUNCHTIME_ENABLED || IGB_LAUNCHTIME_ENABLED
+	// Transmit interval in nanoseconds.
+	U32 txIntervalNs;
+#endif
 } pvt_data_t;
 
 static void x_calculateSizes(media_q_t *pMediaQ)
@@ -238,6 +242,10 @@ static void x_calculateSizes(media_q_t *pMediaQ)
 			pPubMapInfo->framesPerPacket += 1;
 		}
 		AVB_LOGF_INFO("Frames/packet = %d", pPubMapInfo->framesPerPacket);
+#if ATL_LAUNCHTIME_ENABLED || IGB_LAUNCHTIME_ENABLED
+		pPvtData->txIntervalNs = 1000000000u / pPvtData->txInterval;
+		AVB_LOGF_INFO("LT interval ns:%d", pPvtData->txIntervalNs);
+#endif
 
 		// AAF packet size calculations
 		pPubMapInfo->packetFrameSizeBytes = pPubMapInfo->packetSampleSizeBytes * pPubMapInfo->audioChannels;
@@ -404,6 +412,48 @@ void openavbMapAVTPAudioGenInitCB(media_q_t *pMediaQ)
 	AVB_TRACE_EXIT(AVB_TRACE_MAP);
 }
 
+#if ATL_LAUNCHTIME_ENABLED || IGB_LAUNCHTIME_ENABLED
+bool openavbMapAVTPLaunchtimeCalculationCB(media_q_t *pMediaQ, U64 *lt)
+{
+	pvt_data_t *pPvtData = pMediaQ->pPvtMapInfo;
+	bool res;
+	media_q_item_t *pMediaQItem;
+
+	AVB_TRACE_ENTRY(AVB_TRACE_MAP);
+
+	if (pPvtData->maxTransitUsec == 0) {
+		// Disable packet timestamping if no transit time configured
+		*lt = 0;
+		res = true;
+	} else if ((pMediaQItem = openavbMediaQTailLock(pMediaQ, true)) != NULL) {
+		media_q_pub_map_aaf_audio_info_t *pPubMapInfo = pMediaQ->pPubMapInfo;
+
+		if (pMediaQItem->readIdx == 0) /* packet and frame align at AVTP time */
+			pPvtData->intervalCounter = 0;
+
+		*lt = pMediaQItem->pAvtpTime->timeNsec;
+		*lt += pPvtData->intervalCounter * pPvtData->txIntervalNs;
+		pPvtData->intervalCounter++;
+
+		// openavbMapAVTPAudioTxCB() will set transit time or the presentation
+		// latency, whichever is greater. Account for a presentation latency
+		// which is greater than the transit time by offsetting the launchtime
+		// by the difference between the two.
+		if (pPubMapInfo->presentationLatencyUSec > pPvtData->maxTransitUsec)
+			*lt += (pPubMapInfo->presentationLatencyUSec - pPvtData->maxTransitUsec) * NANOSECONDS_PER_USEC;
+
+		openavbMediaQTailUnlock(pMediaQ);
+		res = true;
+	} else {
+		res = false;
+	}
+
+	AVB_TRACE_EXIT(AVB_TRACE_MAP);
+
+	return res;
+}
+#endif /* ATL_LAUNCHTIME_ENABLED || IGB_LAUNCHTIME_ENABLED */
+
 // A call to this callback indicates that this mapping module will be
 // a talker. Any talker initialization can be done in this function.
 void openavbMapAVTPAudioTxInitCB(media_q_t *pMediaQ)
@@ -489,8 +539,11 @@ tx_cb_ret_t openavbMapAVTPAudioTxCB(media_q_t *pMediaQ, U8 *pData, U32 *dataLen)
 				*pHdr++ = 0; // Clear the timestamp field
 			}
 			else {
-				// Add the max transit time.
-				openavbAvtpTimeAddUSec(pMediaQItem->pAvtpTime, pPvtData->maxTransitUsec);
+				// Add the max transit time, or the presentation latency, whichever is greater
+				if (pPubMapInfo->presentationLatencyUSec > pPvtData->maxTransitUsec)
+					    openavbAvtpTimeAddUSec(pMediaQItem->pAvtpTime, pPubMapInfo->presentationLatencyUSec);
+				else
+					    openavbAvtpTimeAddUSec(pMediaQItem->pAvtpTime, pPvtData->maxTransitUsec);
 
 				// Set timestamp valid flag
 				pHdrV0[HIDX_AVTP_HIDE7_TV1] |= 0x01;
@@ -874,6 +927,9 @@ extern DLL_EXPORT bool openavbMapAVTPAudioInitialize(media_q_t *pMediaQ, openavb
 		pMapCB->map_rx_cb = openavbMapAVTPAudioRxCB;
 		pMapCB->map_end_cb = openavbMapAVTPAudioEndCB;
 		pMapCB->map_gen_end_cb = openavbMapAVTPAudioGenEndCB;
+#if ATL_LAUNCHTIME_ENABLED || IGB_LAUNCHTIME_ENABLED
+		pMapCB->map_lt_calc_cb = openavbMapAVTPLaunchtimeCalculationCB;
+#endif
 
 		pPvtData->itemCount = 20;
 		pPvtData->txInterval = 4000;  // default to something that wont cause divide by zero
