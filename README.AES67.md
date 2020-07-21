@@ -8,25 +8,25 @@ lukeh@padl.com
 
 The AVB to AES67 is a work in progress / proof of concept attempt at providing a transparent(-ish) bridge between the Audio Video Bridging and AES67 protocols.
 
-**The bridge is not yet ready for production use.** In my testing, which admittedly involved proprietary endpoints in a fairly complex network configuration and PTP topology, I had difficulty synchronizing all the media clocks. I'm hoping this is simply a configuration or implementation issue, rather than a fundamental design one!
+**The bridge is not yet ready for production use.** In my testing, which admittedly involved proprietary endpoints in a not-straightforward network configuration and clock topology, I had difficulty synchronizing all the media clocks. I'm hoping this is simply a configuration or implementation issue, rather than a fundamental design one.
 
 ## Background
 
 AVB and AES67 are abstractly similar protocols for transporting audio information over a network. They both involve sending (typically via multicast) timestamped audio packets at regular intervals, referenced to a common PTP clock. Very few endpoints support both protocols, so in a mixed environment a degree of interoperability can be desirable.
 
-The principal difference between the two protocols is that AVB operates at Layer 2 (using the Audio Video Transport Protocol, or AVTP) and AES67 at Layer 3 (using RTP). AVB uses a PTP profile that also operates at Layer 2 (802.1AS), with specific constraints; AES67 uses PTPv2 over UDP. PTP time is distributed hierarchically with a single (but floating) grandmaster. AES67 derives the media clock directly from the PTP time, whereas AVB cross-stamps an explicit media clock stream with the PTP time.
+The principal difference between the two protocols is that AVB operates at Layer 2 (using the Audio Video Transport Protocol, or AVTP) and AES67 at Layer 3 (using RTP). AVB uses a PTP profile that also operates at Layer 2 (802.1AS), whereas AES67 uses PTPv2 over UDP. PTP time is distributed hierarchically with a single (but floating) grandmaster. AES67 derives the media clock directly from the PTP time, whereas AVB timestamps the audio packets themselves (from which the media clock can be recovered).
 
-Both AVTP and RTP packets can carry PCM audio (at least, 16-bit and 24-bit) at a variety of sampling rates. Audio encoding is similar; differences are in how the packets are referenced backed to the common clock. The 61883-6 format used by older AVB implementations has some unusual quirks, in that audio frames may cross packet boundaries, and that it is the frames rather than the packets that are timestamped (in other words, the AVTP timestamp may not refer to the first sample in the packet). The newer AVTP Audio Format (AAF) simplifies this and saves on bandwidth (by not using 32-bit sample words unless specifically required), but not all equipment supports it.
+Both AVTP and RTP packets can carry PCM audio at a variety of sampling rates. Sample encoding is identical (AES67 can even support the AM824 format used by AVB), but there are differences in packet framing and media clock recovery. Audio can be carried in AVTP using the older 61883-6 packet format used in FireWire (which has some unusual quirks), or the new AVTP Audio Format (AAF) which simplifies time-stamping and uses a more compact encoding. Most deployed AVB endpoints only support the former encoding.
 
-RTP timestamps packets with the media clock (which with the addition of an offset, maps directly to PTP time), whereas AVTP timestamps packet with the PTP time, from which the media clock can be recovered. Both packet formats use 32-bit wrapping timestamps, so the receiver needs the current time to set the most significant bits.
+RTP timestamps packets with the media clock (which maps directly to PTP time, minus an offset). By contrast, AVTP timestamps packets with the PTP (”wall”) time, from which the media clock can be recovered. Both packet formats use 32-bit wrapping timestamps, so the receiver does need the current PTP time to recover the most significant bits.
 
 ## Bridge
 
-Having established this, it should be possible to bridge between the two protocols without re-clocking the audio as long as all endpoints share a common PTP clock domain (and media clock, in the case of AVB). The bridge only uses the PTP time for determining the media clock offset, otherwise it can operate quasi-asynchronously (of course, it cannot miss a deadline, and ideally it will send packets at a fixed interval). One current limitation is that AES67 must be the AVB media clock master: if the AVB is running the media clock, it would need to run at exactly the frequency (relative to the PTP clock), and use a statically configurable offset against the PTP time. 
+It should be possible to bridge between the two protocols without re-clocking the audio as long as all endpoints share a common PTP clock domain (and media clock, in the case of AVB). The bridge is not sensitive to the current PTP time (except for determining the media clock offset), so can operate quasi-asynchronously. One current limitation is that AES67 must be the AVB media clock master. 
 
-The bridge requires a PTP boundary clock (BC) that can handle multiple profiles of PTP simultaneously: the Linux PTP project (`ptp4l`) is one such implementation. I extended it to support multiple PTP ports over a single interface; this allows a common physical hardware clock (PHC) to be used across both profiles of PTP. This is useful for testing. A practical deployment would likely use separate networks for AVB and AES67. A stable clock would be best implemented with a multi-port NIC with a single PHC; I'm not aware of any that also support multiple hardware queues and hardware timestamping. (An alternative is a bunch of Intel i210s that have their clock SDP pins tied together, with `ts2phc`.)
+The bridge requires a PTP boundary clock (BC) that can handle multiple profiles of PTP simultaneously: the Linux PTP project (`ptp4l`) is one such implementation. I extended it to support multiple PTP ports over a single interface; this allows a common physical hardware clock (PHC) to be used across both profiles of PTP. This is useful for testing. A practical deployment would likely use separate networks for AVB and AES67. A stable clock would be best implemented with a multi-port NIC with a single PHC, or with its clock SDP pins tied together with `ts2phc`.
 
-The AES to AES67 Bridge is implemented as an interface module for the OpenAvnu AVTP pipeline (originally the EAVB stack from Symphony Teleca Corporation, now Harman). Whilst it does require some configuration, it is flexible, easily to debug, and also implements the discovery components of AVB (AVDECC).
+The AES to AES67 Bridge is implemented as an interface module for the OpenAvnu AVTP pipeline (originally the EAVB stack from Symphony Teleca Corporation, now Harman). Whilst it does require some configuration, it is a flexible piece of open source which provides an event loop, is easy to debug, and also implements the discovery components of AVB (AVDECC).
 
 The test environment consisted of an Avid S3 (AVB endpoint) and Avid MTRX in AES67 mode (AES67 endpoint). The MTRX was configured as the clock master. A Mac Pro running Ubuntu 20.04 (with the low latency kernel) and an Intel i210 Ethernet card served as the bridge. The network switch was an Extreme Networks X460-48p in AVB mode. All devices were on the same network (notwithstanding AVB VLAN reservations).
 
@@ -87,7 +87,7 @@ If you are running AVB and AES67 over the same interface, you should reduce the 
 
 Bridge configuration files live in `lib/avtp_pipeline/platform/Linux/intf_aes67/aes67_{listener,talker.ini}` and are installed into the `build/bin` directory. You will need to be comfortable editing configuration files and, most likely, running code under the debugger to use it.
 
-It is important to configure the _packing factor_, or ratio of RTP to AVTP packets, correctly. With a default Class A AVTP transmission interval of 8000pps, the packet duration is 125us. RTP will typically use an interval of 1000pps (packet duration 1ms). Thus the packing factor `map_nv_packing_factor` should be set to 8 in both talker and listener, although the bridge will attempt to determine it itself. Having the RTP packet duration being shorter than the AVTP one (fractional packing factor) is not supported. A 1:1 ratio (packing factor of one) should in theory work, but it hasn't been tested. Dante devices in AES67 mode default to a packet time of 1ms which I don't believe is configurable, at least not without Dante Domain Manager.
+It is important to configure the _packing factor_, or ratio of RTP to AVTP packets, correctly. With a default Class A AVTP transmission interval of 8000pps, the packet duration is 125us. RTP will typically use an interval of 1000pps (packet duration 1ms). Thus the packing factor `map_nv_packing_factor` should be set to 8 in both talker and listener, although the bridge will attempt to determine it itself. Having the RTP packet duration being shorter than the AVTP one (fractional packing factor) is not supported. A 1:1 ratio (packing factor of one) should in theory work, but it hasn't been tested. Dante devices in AES67 mode default to a packet time of 1ms which is only configurable if Dante Domain Manager is also installed.
 
 #### Talker
 
@@ -95,7 +95,7 @@ The AVB talker _receives_ AES67, and sends AVB. Configuration options are descri
 
 ##### intf_nv_audio_rate
 
-The sampling frequency in samples per second, e.g. 48000. I have not tested other frequencies and it is likely that sample rates that do not have a base rate of this frequency will not work.
+The sampling frequency in samples per second, e.g. 48000. I have not tested other frequencies and it is likely that sample rates that do not have a base rate of this frequency may not work reliably.
 
 ##### intf_nv_audio_bit_depth
 
